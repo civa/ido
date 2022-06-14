@@ -12,9 +12,6 @@ abstract contract Context {
         return msg.data;
     }
 }
-
-
-
 contract Ownable is Context {
     address private _owner;
 
@@ -95,9 +92,9 @@ contract IDO is ReentrancyGuard, Context, Ownable {
     mapping (address => bool) public _whitelisted;
     
     IERC20 public _token;
+    address public busd = 0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56;
     uint256 private _tokenDecimals;
     address public _wallet;
-    IERC20 public _stakeContract;
     uint256 public _rate;
     uint256 public _weiRaised;
     uint256 public endIDO;
@@ -105,7 +102,8 @@ contract IDO is ReentrancyGuard, Context, Ownable {
     uint public maxPurchase;
     uint public minimumStake;
     uint public hardcap;
-    uint public purchasedTokens;
+    uint public totalSold;
+    mapping(address => uint) public purchasedTokens;
     bool public unlock;
     bool public allowNonWhitelist = false;
     uint public whitelistCap;
@@ -117,17 +115,16 @@ contract IDO is ReentrancyGuard, Context, Ownable {
 
     event TokensPurchased(address  purchaser, uint256 value, uint256 amount);
     event Refund(address recipient, uint256 amount);
-    constructor (uint256 rate, uint256 minStake, uint256 _whitelistcap , address wallet, IERC20 stakeContract, IERC20 token)  {
+    constructor (uint256 rate, uint256 minStake, uint256 _whitelistcap , address wallet, IERC20 token)  {
         require(rate > 0, "Pre-Sale: rate is 0");
         require(wallet != address(0), "Pre-Sale: wallet is the zero address");
         require(address(token) != address(0), "Pre-Sale: token is the zero address");
         
         _rate = rate;
-        _stakeContract = stakeContract;
         minimumStake = minStake;
         _wallet = wallet;
         whitelistCap = _whitelistcap;
-        
+        allowNonWhitelist = true;
         _token = token;
         _tokenDecimals = 18 - _token.decimals();
     }
@@ -146,7 +143,6 @@ contract IDO is ReentrancyGuard, Context, Ownable {
     
     //Start Pre-Sale
     function startIDO(uint endDate, uint _minPurchase, uint _maxPurchase, uint256 _hardcap) external onlyOwner idoNotActive() {
-        require(whitelistAddresses.length > 0, 'Whitelist not set yet');
         require(endDate > block.timestamp, 'duration should be > 0');
         require(_minPurchase > 0, '_minPurchase should > 0');
         endIDO = endDate; 
@@ -161,14 +157,14 @@ contract IDO is ReentrancyGuard, Context, Ownable {
     }
     
     //Pre-Sale 
-    function buyTokens() public nonReentrant idoActive payable{
-        IERC20 tokenBEP = _stakeContract;
-        require (tokenBEP.stakes(msg.sender) >= minimumStake, "You need to stake more than minimum AVN amount");
-        uint256 weiAmount = msg.value;
+    function buyTokens(uint256 _amount) public nonReentrant idoActive payable{
+        uint256 weiAmount = _amount;
+        IERC20(busd).transferFrom(msg.sender , _wallet , _amount);
         uint256 tokens = _getTokenAmount(weiAmount);
         _preValidatePurchase(msg.sender, weiAmount);
         _weiRaised = _weiRaised + weiAmount;
-        purchasedTokens += tokens;
+        purchasedTokens[msg.sender] += weiAmount;
+        totalSold += tokens;
         _contributions[msg.sender] = _contributions[msg.sender] + weiAmount;
         emit TokensPurchased(msg.sender, weiAmount, tokens);
     }
@@ -181,17 +177,7 @@ contract IDO is ReentrancyGuard, Context, Ownable {
         require(weiAmount != 0, "Presale: weiAmount is 0");
         require(weiAmount >= minPurchase, 'have to send at least: minPurchase');
         require(_weiRaised + weiAmount <= hardcap, "Exceeding hardcap");
-        if (_whitelisted[beneficiary] == true){
-             require(_contributions[beneficiary] + weiAmount <= whitelistCap, "can't buy more than: whitelistCap");
-        } else {
-            require(_contributions[beneficiary] + weiAmount <= maxPurchase, "can't buy more than: maxPurchase");
-        }
-    }
-    function returnStakeAmount(address _address) public view returns(uint){
-        uint stakeAmount;
-        IERC20 tokenBEP = _stakeContract;
-        stakeAmount = tokenBEP.stakes(_address);
-        return stakeAmount;
+        require(_contributions[beneficiary] + weiAmount <= maxPurchase, "can't buy more than: maxPurchase");
     }
 
     function checkWhitelist(address account) external view returns(bool){
@@ -202,8 +188,8 @@ contract IDO is ReentrancyGuard, Context, Ownable {
         return weiAmount * _rate / 10**_tokenDecimals;
     }
 
-    function _forwardFunds(uint256 amount) external onlyOwner {
-        payable(_wallet).transfer(amount);
+    function _forwardFunds() external onlyOwner {
+        IERC20(busd).transfer(_wallet , IERC20(busd).balanceOf(address(this)));
     }
     function _setMinStake(uint256 _newAmount) public onlyOwner {
     minimumStake = _newAmount;
@@ -262,9 +248,9 @@ contract IDO is ReentrancyGuard, Context, Ownable {
           tokenBEP.transfer(msg.sender, (checkContribution(msg.sender)));
          _contributions[msg.sender] = 0;
     }
-    function addContribution(address _address, uint256 _bnbAmount) public onlyOwner{
-        uint256 bnbAmount = _bnbAmount ;
-        _contributions[_address] = _contributions[_address] + bnbAmount;
+    function addContribution(address _address, uint256 _busdAmount) public onlyOwner{
+        uint256 busdAmount = _busdAmount ;
+        _contributions[_address] = _contributions[_address] + busdAmount;
  
     }    
     function subContribution(address _address, uint256 _bnbAmount) public onlyOwner{
